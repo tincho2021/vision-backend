@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Vision Test – ESP32 / Backend</title>
+  <style>
+    body {
+      background:#111;
+      color:#fff;
+      font-family: Arial, sans-serif;
+      text-align:center;
+      padding:20px;
+    }
+    img {
+      max-width: 320px;
+      margin: 15px 0;
+      border: 2px solid #444;
+    }
+    button {
+      font-size:16px;
+      padding:10px 16px;
+      margin:10px;
+      cursor:pointer;
+    }
+    #result {
+      margin-top:20px;
+      font-size:18px;
+      color:#0f0;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🧠 Vision Backend – Test Manual</h1>
+
+<input type="file" id="file" accept="image/*"><br>
+
+<img id="preview" style="display:none"><br>
+
+<button onclick="analyze()">Analizar imagen</button>
+
+<div id="result">Esperando imagen…</div>
+
+<script>
+const BACKEND_URL = "https://vision-backend-6s92.onrender.com/analyze";
+
+let selectedFile = null;
+
+document.getElementById("file").addEventListener("change", e => {
+  selectedFile = e.target.files[0];
+  if (!selectedFile) return;
+
+  const img = document.getElementById("preview");
+  img.src = URL.createObjectURL(selectedFile);
+  img.style.display = "block";
+
+  document.getElementById("result").innerText = "Imagen cargada, lista para analizar";
+});
+
+async function analyze() {
+  if (!selectedFile) {
+    alert("Primero seleccioná una imagen");
+    return;
+  }
+
+  document.getElementById("result").innerText = "Analizando…";
+
+  try {
+    const res = await fetch(BACKEND_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream"
+      },
+      body: selectedFile
+    });
+
+    const text = await res.text();
+    document.getElementById("result").innerText = text;
+
+  } catch (e) {
+    document.getElementById("result").innerText = "Error de conexión";
+  }
+}
+</script>
+
+</body>
+</html>
