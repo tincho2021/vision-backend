@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Behavior-Action Vision</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #111;
+  color: #eee;
+  text-align: center;
+  padding: 30px;
+}
+input, button {
+  font-size: 16px;
+  margin: 10px;
+}
+img {
+  max-width: 400px;
+  margin-top: 20px;
+  border: 2px solid #444;
+}
+pre {
+  background: #222;
+  padding: 15px;
+  text-align: left;
+  max-width: 600px;
+  margin: 20px auto;
+  overflow-x: auto;
+}
+</style>
+</head>
+<body>
+
+<h1>🧠 Behavior-Action Vision</h1>
+
+<input type="file" id="file" accept="image/*"><br>
+<button onclick="analyze()">Analizar imagen</button>
+
+<div>
+  <img id="preview">
+</div>
+
+<pre id="result">Esperando imagen…</pre>
+
+<script>
+const BACKEND = "https://vision-backend-6s92.onrender.com/analyze";
+
+function analyze() {
+  const fileInput = document.getElementById("file");
+  if (!fileInput.files.length) {
+    alert("Seleccioná una imagen");
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const img = document.getElementById("preview");
+  img.src = URL.createObjectURL(file);
+
+  const form = new FormData();
+  form.append("image", file);
+
+  document.getElementById("result").textContent = "Analizando…";
+
+  fetch(BACKEND, {
+    method: "POST",
+    body: form
+  })
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById("result").textContent =
+      JSON.stringify(data, null, 2);
+  })
+  .catch(err => {
+    document.getElementById("result").textContent =
+      "Error: " + err;
+  });
+}
+</script>
+
+</body>
+</html>
