@@ -1,85 +1,80 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title>Vision Test – ESP32 / Backend</title>
-  <style>
-    body {
-      background:#111;
-      color:#fff;
-      font-family: Arial, sans-serif;
-      text-align:center;
-      padding:20px;
-    }
-    img {
-      max-width: 320px;
-      margin: 15px 0;
-      border: 2px solid #444;
-    }
-    button {
-      font-size:16px;
-      padding:10px 16px;
-      margin:10px;
-      cursor:pointer;
-    }
-    #result {
-      margin-top:20px;
-      font-size:18px;
-      color:#0f0;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Behavior-Action Vision</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  background: #111;
+  color: #eee;
+  text-align: center;
+  padding: 30px;
+}
+input, button {
+  font-size: 16px;
+  margin: 10px;
+}
+img {
+  max-width: 400px;
+  margin-top: 20px;
+  border: 2px solid #444;
+}
+pre {
+  background: #222;
+  padding: 15px;
+  text-align: left;
+  max-width: 600px;
+  margin: 20px auto;
+  overflow-x: auto;
+}
+</style>
 </head>
 <body>
 
-<h1>🧠 Vision Backend – Test Manual</h1>
+<h1>🧠 Behavior-Action Vision</h1>
 
 <input type="file" id="file" accept="image/*"><br>
-
-<img id="preview" style="display:none"><br>
-
 <button onclick="analyze()">Analizar imagen</button>
 
-<div id="result">Esperando imagen…</div>
+<div>
+  <img id="preview">
+</div>
+
+<pre id="result">Esperando imagen…</pre>
 
 <script>
-const BACKEND_URL = "https://vision-backend-6s92.onrender.com/analyze";
+const BACKEND = "https://vision-backend-6s92.onrender.com/analyze";
 
-let selectedFile = null;
-
-document.getElementById("file").addEventListener("change", e => {
-  selectedFile = e.target.files[0];
-  if (!selectedFile) return;
-
-  const img = document.getElementById("preview");
-  img.src = URL.createObjectURL(selectedFile);
-  img.style.display = "block";
-
-  document.getElementById("result").innerText = "Imagen cargada, lista para analizar";
-});
-
-async function analyze() {
-  if (!selectedFile) {
-    alert("Primero seleccioná una imagen");
+function analyze() {
+  const fileInput = document.getElementById("file");
+  if (!fileInput.files.length) {
+    alert("Seleccioná una imagen");
     return;
   }
 
-  document.getElementById("result").innerText = "Analizando…";
+  const file = fileInput.files[0];
+  const img = document.getElementById("preview");
+  img.src = URL.createObjectURL(file);
 
-  try {
-    const res = await fetch(BACKEND_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream"
-      },
-      body: selectedFile
-    });
+  const form = new FormData();
+  form.append("image", file);
 
-    const text = await res.text();
-    document.getElementById("result").innerText = text;
+  document.getElementById("result").textContent = "Analizando…";
 
-  } catch (e) {
-    document.getElementById("result").innerText = "Error de conexión";
-  }
+  fetch(BACKEND, {
+    method: "POST",
+    body: form
+  })
+  .then(r => r.json())
+  .then(data => {
+    document.getElementById("result").textContent =
+      JSON.stringify(data, null, 2);
+  })
+  .catch(err => {
+    document.getElementById("result").textContent =
+      "Error: " + err;
+  });
 }
 </script>
 
