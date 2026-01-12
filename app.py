@@ -7,7 +7,7 @@ app = Flask(__name__)
 # ================= CONFIG =================
 HF_TOKEN = os.environ.get("HF_TOKEN")
 if not HF_TOKEN:
-    raise RuntimeError("HF_TOKEN no definido en variables de entorno")
+    raise RuntimeError("HF_TOKEN no definido")
 
 HF_MODEL = "google/vit-base-patch16-224"
 
@@ -18,8 +18,7 @@ HF_URL = (
 
 HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}",
-    "Accept": "application/json",
-    "Content-Type": "image/jpeg",
+    "Accept": "application/json"
 }
 
 # ================= ROUTES =================
@@ -39,7 +38,7 @@ def analyze():
             HF_URL,
             headers=HEADERS,
             data=img,
-            timeout=120  # ⏱️ HF puede tardar en despertar el modelo
+            timeout=120
         )
     except Exception as e:
         return jsonify({
@@ -65,7 +64,7 @@ def analyze():
     if not isinstance(data, list) or not data:
         return jsonify({
             "ok": False,
-            "error": "Empty or invalid model response"
+            "error": "Empty model response"
         }), 500
 
     top = data[0]
