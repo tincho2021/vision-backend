@@ -1,70 +1,16 @@
-import os
-import io
-import numpy as np
-import requests
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
-from PIL import Image
-
-# -------------------------
-# CONFIG
-# -------------------------
-
-HF_TOKEN = os.getenv("HF_TOKEN")
-HF_MODEL_EMBED = "sentence-transformers/clip-ViT-B-32"
-HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{HF_MODEL_EMBED}"
-
-SIMILARITY_THRESHOLD = 0.92  # menor = más sensible al cambio
-
-# -------------------------
-# APP INIT
-# -------------------------
+import cv2
+import numpy as np
+from skimage.metrics import structural_similarity as ssim
+import tempfile
+import os
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
-reference_embedding = None
+REFERENCE_IMAGE = None
 
-# -------------------------
-# UTILS
-# -------------------------
-
-def image_to_bytes(file):
-    image = Image.open(file).convert("RGB")
-    buf = io.BytesIO()
-    image.save(buf, format="PNG")
-    return buf.getvalue()
-
-
-def get_image_embedding(image_bytes):
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}",
-        "Content-Type": "application/octet-stream",
-    }
-
-    response = requests.post(
-        HF_API_URL,
-        headers=headers,
-        data=image_bytes,
-        timeout=60,
-    )
-
-    if response.status_code != 200:
-        raise RuntimeError(
-            f"HF embed error ({response.status_code}): {response.text}"
-        )
-
-    embedding = np.array(response.json(), dtype=np.float32)
-    return embedding / np.linalg.norm(embedding)
-
-
-def cosine_similarity(a, b):
-    return float(np.dot(a, b))
-
-
-# -------------------------
-# ROUTES
-# -------------------------
 
 @app.route("/")
 def index():
@@ -73,73 +19,65 @@ def index():
 
 @app.route("/health")
 def health():
-    return jsonify({"ok": True, "service": "Behavior-Action Vision"})
+    return jsonify(ok=True, service="Behavior-Action Vision")
+
+
+def read_image(file):
+    data = np.frombuffer(file.read(), np.uint8)
+    img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
+    return img
 
 
 @app.route("/reference", methods=["POST"])
 def set_reference():
-    global reference_embedding
+    global REFERENCE_IMAGE
 
     if "image" not in request.files:
-        return jsonify({"ok": False, "error": "No image provided"}), 400
+        return jsonify(ok=False, error="No image provided"), 400
 
-    try:
-        image_bytes = image_to_bytes(request.files["image"])
-        reference_embedding = get_image_embedding(image_bytes)
+    img = read_image(request.files["image"])
+    if img is None:
+        return jsonify(ok=False, error="Invalid image"), 400
 
-        return jsonify({
-            "ok": True,
-            "message": "Reference image set successfully"
-        })
-
-    except Exception as e:
-        return jsonify({
-            "ok": False,
-            "error": str(e)
-        }), 500
+    REFERENCE_IMAGE = img
+    return jsonify(ok=True, message="Reference image set")
 
 
 @app.route("/behavior", methods=["POST"])
 def analyze_behavior():
-    global reference_embedding
+    global REFERENCE_IMAGE
 
-    if reference_embedding is None:
-        return jsonify({
-            "ok": False,
-            "error": "Reference not set"
-        }), 400
+    if REFERENCE_IMAGE is None:
+        return jsonify(ok=False, error="Reference not set"), 400
 
     if "image" not in request.files:
-        return jsonify({
-            "ok": False,
-            "error": "No image provided"
-        }), 400
+        return jsonify(ok=False, error="No image provided"), 400
 
-    try:
-        image_bytes = image_to_bytes(request.files["image"])
-        current_embedding = get_image_embedding(image_bytes)
+    img = read_image(request.files["image"])
+    if img is None:
+        return jsonify(ok=False, error="Invalid image"), 400
 
-        similarity = cosine_similarity(reference_embedding, current_embedding)
-        changed = similarity < SIMILARITY_THRESHOLD
+    # Resize to match
+    img = cv2.resize(img, (REFERENCE_IMAGE.shape[1], REFERENCE_IMAGE.shape[0]))
 
-        return jsonify({
-            "ok": True,
-            "behavior": "changed" if changed else "stable",
-            "similarity": round(similarity, 4),
-            "threshold": SIMILARITY_THRESHOLD,
-            "confidence_change": round((1 - similarity) * 100, 2)
-        })
+    score, diff = ssim(REFERENCE_IMAGE, img, full=True)
+    diff = (diff * 255).astype("uint8")
 
-    except Exception as e:
-        return jsonify({
-            "ok": False,
-            "error": str(e)
-        }), 500
+    change_level = float(1 - score)
 
+    behavior = "stable"
+    if change_level > 0.15:
+        behavior = "changed"
+    if change_level > 0.35:
+        behavior = "critical change"
 
-# -------------------------
-# MAIN
-# -------------------------
+    return jsonify(
+        ok=True,
+        similarity=score,
+        change=change_level,
+        behavior=behavior
+    )
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
