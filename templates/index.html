@@ -3,78 +3,102 @@
 <head>
 <meta charset="UTF-8">
 <title>Behavior-Action Vision</title>
+
 <style>
 body {
-  font-family: Arial, sans-serif;
-  background: #111;
-  color: #eee;
-  text-align: center;
-  padding: 30px;
+    font-family: Arial, sans-serif;
+    background: #111;
+    color: #eee;
+    text-align: center;
+    padding: 30px;
 }
-input, button {
-  font-size: 16px;
-  margin: 10px;
+button {
+    padding: 10px 20px;
+    margin: 10px;
+    font-size: 16px;
+    cursor: pointer;
+}
+input {
+    margin: 10px;
 }
 img {
-  max-width: 400px;
-  margin-top: 20px;
-  border: 2px solid #444;
+    max-width: 400px;
+    margin-top: 20px;
+    border: 2px solid #444;
 }
 pre {
-  background: #222;
-  padding: 15px;
-  text-align: left;
-  max-width: 600px;
-  margin: 20px auto;
-  overflow-x: auto;
+    background: #222;
+    padding: 15px;
+    max-width: 700px;
+    margin: 20px auto;
+    overflow-x: auto;
+    text-align: left;
 }
+.status-stable { color: #00ff88; }
+.status-changed { color: #ff4444; }
+.status-unknown { color: #ffaa00; }
 </style>
 </head>
+
 <body>
 
 <h1>🧠 Behavior-Action Vision</h1>
 
-<input type="file" id="file" accept="image/*"><br>
-<button onclick="analyze()">Analizar imagen</button>
+<input type="file" id="imageInput" accept="image/*"><br>
+
+<button onclick="setReference()">📌 Setear referencia</button>
+<button onclick="analyze()">🔍 Analizar comportamiento</button>
 
 <div>
-  <img id="preview">
+    <img id="preview">
 </div>
 
-<pre id="result">Esperando imagen…</pre>
+<h3>Resultado</h3>
+<pre id="output">Sin datos</pre>
 
 <script>
-const BACKEND = "https://vision-backend-6s92.onrender.com/analyze";
+const imageInput = document.getElementById("imageInput");
+const preview = document.getElementById("preview");
+const output = document.getElementById("output");
+
+imageInput.onchange = () => {
+    const file = imageInput.files[0];
+    if (file) preview.src = URL.createObjectURL(file);
+};
+
+function send(endpoint) {
+    const file = imageInput.files[0];
+    if (!file) {
+        alert("Seleccioná una imagen");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    fetch(endpoint, {
+        method: "POST",
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        let behavior = data.behavior || "unknown";
+        let cls = "status-" + behavior;
+
+        output.innerHTML =
+            `<span class="${cls}">${JSON.stringify(data, null, 2)}</span>`;
+    })
+    .catch(err => {
+        output.textContent = "Error: " + err;
+    });
+}
+
+function setReference() {
+    send("/set_reference");
+}
 
 function analyze() {
-  const fileInput = document.getElementById("file");
-  if (!fileInput.files.length) {
-    alert("Seleccioná una imagen");
-    return;
-  }
-
-  const file = fileInput.files[0];
-  const img = document.getElementById("preview");
-  img.src = URL.createObjectURL(file);
-
-  const form = new FormData();
-  form.append("image", file);
-
-  document.getElementById("result").textContent = "Analizando…";
-
-  fetch(BACKEND, {
-    method: "POST",
-    body: form
-  })
-  .then(r => r.json())
-  .then(data => {
-    document.getElementById("result").textContent =
-      JSON.stringify(data, null, 2);
-  })
-  .catch(err => {
-    document.getElementById("result").textContent =
-      "Error: " + err;
-  });
+    send("/analyze");
 }
 </script>
 
