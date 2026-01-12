@@ -1,15 +1,13 @@
 from flask import Flask, request, jsonify, render_template
 import requests
 import os
+import numpy as np
 
 app = Flask(__name__)
 
-# ================= CONFIG =================
 HF_TOKEN = os.environ.get("HF_TOKEN")
-if not HF_TOKEN:
-    raise RuntimeError("HF_TOKEN no definido")
-
 HF_MODEL = "google/vit-base-patch16-224"
+
 HF_URL = f"https://router.huggingface.co/hf-inference/models/{HF_MODEL}"
 
 HEADERS = {
@@ -19,78 +17,50 @@ HEADERS = {
     "x-wait-for-model": "true"
 }
 
-# ================= MEMORY =================
-REFERENCE = None  # guarda {label, confidence}
+def cosine_distance(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return 1 - np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-# ================= ROUTES =================
+def get_embedding(img_bytes):
+    r = requests.post(
+        HF_URL,
+        headers=HEADERS,
+        data=img_bytes,
+        params={"feature_extraction": True},
+        timeout=120
+    )
+    r.raise_for_status()
+    return r.json()[0]
+
+@app.route("/compare", methods=["POST"])
+def compare():
+    if "before" not in request.files or "after" not in request.files:
+        return jsonify({"ok": False, "error": "Need before and after images"}), 400
+
+    img1 = request.files["before"].read()
+    img2 = request.files["after"].read()
+
+    try:
+        emb1 = get_embedding(img1)
+        emb2 = get_embedding(img2)
+        dist = cosine_distance(emb1, emb2)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    behavior = "changed" if dist > 0.08 else "stable"
+
+    return jsonify({
+        "ok": True,
+        "behavior": behavior,
+        "difference": round(dist, 4),
+        "model": HF_MODEL
+    })
+
 @app.route("/")
 def index():
     return render_template("index.html")
 
-@app.route("/set_reference", methods=["POST"])
-def set_reference():
-    global REFERENCE
-
-    if "image" not in request.files:
-        return jsonify({"ok": False, "error": "No image provided"}), 400
-
-    img = request.files["image"].read()
-
-    r = requests.post(HF_URL, headers=HEADERS, data=img, timeout=120)
-    data = r.json()
-
-    if not isinstance(data, list) or not data:
-        return jsonify({"ok": False, "error": "Invalid model response"}), 500
-
-    top = data[0]
-
-    REFERENCE = {
-        "label": top.get("label"),
-        "confidence": round(top.get("score", 0) * 100, 2)
-    }
-
-    return jsonify({
-        "ok": True,
-        "reference": REFERENCE
-    })
-
-@app.route("/analyze", methods=["POST"])
-def analyze():
-    if "image" not in request.files:
-        return jsonify({"ok": False, "error": "No image provided"}), 400
-
-    img = request.files["image"].read()
-
-    r = requests.post(HF_URL, headers=HEADERS, data=img, timeout=120)
-    data = r.json()
-
-    if not isinstance(data, list) or not data:
-        return jsonify({"ok": False, "error": "Invalid model response"}), 500
-
-    top = data[0]
-    label = top.get("label")
-    confidence = round(top.get("score", 0) * 100, 2)
-
-    behavior = "unknown"
-
-    if REFERENCE:
-        if label != REFERENCE["label"]:
-            behavior = "changed"
-        elif abs(confidence - REFERENCE["confidence"]) > 20:
-            behavior = "changed"
-        else:
-            behavior = "stable"
-
-    return jsonify({
-        "ok": True,
-        "label": label,
-        "confidence": confidence,
-        "behavior": behavior,
-        "reference": REFERENCE,
-        "model": HF_MODEL
-    })
-
-# ================= MAIN =================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
