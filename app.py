@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, render_template
 import requests
 import os
+import time
 
 app = Flask(__name__)
 
@@ -19,9 +20,6 @@ HEADERS = {
     "x-wait-for-model": "true"
 }
 
-# ================= STATE =================
-REFERENCE = None   # se guarda en RAM
-
 # ================= ROUTES =================
 @app.route("/")
 def index():
@@ -29,84 +27,51 @@ def index():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    img = request.files.get("image")
-    if not img:
-        return jsonify(ok=False, error="No image"), 400
+    if "image" not in request.files:
+        return jsonify({"ok": False, "error": "No image provided"}), 400
 
-    return run_model(img.read())
+    img = request.files["image"].read()
 
-@app.route("/reference", methods=["POST"])
-def set_reference():
-    global REFERENCE
+    for attempt in range(3):
+        try:
+            r = requests.post(
+                HF_URL,
+                headers=HEADERS,
+                data=img,
+                timeout=120
+            )
+        except Exception as e:
+            return jsonify({
+                "ok": False,
+                "error": f"Request failed: {str(e)}"
+            }), 500
 
-    img = request.files.get("image")
-    if not img:
-        return jsonify(ok=False, error="No image"), 400
+        # HuggingFace a veces responde texto plano
+        if "application/json" not in r.headers.get("Content-Type", ""):
+            time.sleep(2)
+            continue
 
-    result = run_model(img.read())
-    if not result.get("ok"):
-        return result, 500
+        data = r.json()
 
-    REFERENCE = result
-    return jsonify(ok=True, reference=result)
+        # Modelo dormido / error HF
+        if isinstance(data, dict) and data.get("error"):
+            time.sleep(2)
+            continue
 
-@app.route("/behavior", methods=["POST"])
-def behavior():
-    if REFERENCE is None:
-        return jsonify(
-            ok=False,
-            error="No reference set yet"
-        ), 400
+        # Respuesta válida
+        if isinstance(data, list) and len(data) > 0:
+            top = data[0]
+            return jsonify({
+                "ok": True,
+                "label": top.get("label"),
+                "confidence": round(top.get("score", 0) * 100, 2),
+                "model": HF_MODEL
+            })
 
-    img = request.files.get("image")
-    if not img:
-        return jsonify(ok=False, error="No image"), 400
-
-    current = run_model(img.read())
-    if not current.get("ok"):
-        return current, 500
-
-    changed = abs(
-        current["confidence"] - REFERENCE["confidence"]
-    ) > 10
-
-    return jsonify(
-        ok=True,
-        behavior="changed" if changed else "stable",
-        reference=REFERENCE,
-        current=current
-    )
-
-# ================= CORE =================
-def run_model(image_bytes):
-    try:
-        r = requests.post(
-            HF_URL,
-            headers=HEADERS,
-            data=image_bytes,
-            timeout=90
-        )
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-    if "application/json" not in r.headers.get("Content-Type", ""):
-        return {
-            "ok": False,
-            "error": "HF returned non-JSON",
-            "raw": r.text[:200]
-        }
-
-    data = r.json()
-    if not isinstance(data, list) or not data:
-        return {"ok": False, "error": "Empty model response"}
-
-    top = data[0]
-    return {
-        "ok": True,
-        "label": top.get("label"),
-        "confidence": round(top.get("score", 0) * 100, 2),
-        "model": HF_MODEL
-    }
+    return jsonify({
+        "ok": False,
+        "error": "Model not ready or failed after retries"
+    }), 500
 
 # ================= MAIN =================
 if __name__ == "__main__":
