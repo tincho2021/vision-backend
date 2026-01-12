@@ -1,4 +1,6 @@
-flask
-flask-cors
-pillow
-requests
+flask==3.0.3
+flask-cors==4.0.1
+requests==2.32.3
+numpy==2.0.2
+pillow==10.4.0
+gunicorn==22.0.0
