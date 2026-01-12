@@ -11,15 +11,13 @@ if not HF_TOKEN:
 
 HF_MODEL = "google/vit-base-patch16-224"
 
-HF_URL = (
-    f"https://router.huggingface.co/hf-inference/models/{HF_MODEL}"
-    "?wait_for_model=true"
-)
+HF_URL = f"https://router.huggingface.co/hf-inference/models/{HF_MODEL}"
 
 HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}",
     "Content-Type": "application/octet-stream",
-    "Accept": "application/json"
+    "Accept": "application/json",
+    "x-wait-for-model": "true"
 }
 
 # ================= ROUTES =================
