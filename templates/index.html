@@ -57,50 +57,58 @@ pre {
 <pre id="output">Sin datos</pre>
 
 <script>
-const imageInput = document.getElementById("imageInput");
-const preview = document.getElementById("preview");
-const output = document.getElementById("output");
+async function sendImage(endpoint) {
+    const fileInput = document.querySelector('input[type="file"]');
+    const resultBox = document.getElementById("result");
 
-imageInput.onchange = () => {
-    const file = imageInput.files[0];
-    if (file) preview.src = URL.createObjectURL(file);
-};
-
-function send(endpoint) {
-    const file = imageInput.files[0];
-    if (!file) {
-        alert("Seleccioná una imagen");
+    if (!fileInput.files.length) {
+        resultBox.innerText = "❌ No image selected";
         return;
     }
 
     const formData = new FormData();
-    formData.append("image", file);
+    formData.append("image", fileInput.files[0]);
 
-    fetch(endpoint, {
-        method: "POST",
-        body: formData
-    })
-    .then(r => r.json())
-    .then(data => {
-        let behavior = data.behavior || "unknown";
-        let cls = "status-" + behavior;
+    resultBox.innerText = "⏳ Procesando...";
 
-        output.innerHTML =
-            `<span class="${cls}">${JSON.stringify(data, null, 2)}</span>`;
-    })
-    .catch(err => {
-        output.textContent = "Error: " + err;
-    });
-}
+    try {
+        const response = await fetch(endpoint, {
+            method: "POST",
+            body: formData
+        });
 
-function setReference() {
-    send("/set_reference");
+        const contentType = response.headers.get("content-type") || "";
+
+        // 🔐 PROTECCIÓN CLAVE
+        if (!contentType.includes("application/json")) {
+            const text = await response.text();
+            resultBox.innerText =
+                "❌ Backend devolvió HTML (ruta incorrecta)\n\n" +
+                text.slice(0, 300);
+            return;
+        }
+
+        const data = await response.json();
+        resultBox.innerText = JSON.stringify(data, null, 2);
+
+    } catch (err) {
+        resultBox.innerText = "❌ Error JS: " + err.message;
+    }
 }
 
 function analyze() {
-    send("/analyze");
+    sendImage("/analyze");
+}
+
+function setReference() {
+    sendImage("/reference");
+}
+
+function analyzeBehavior() {
+    sendImage("/behavior");
 }
 </script>
+
 
 </body>
 </html>
