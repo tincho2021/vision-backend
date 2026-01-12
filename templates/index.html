@@ -59,55 +59,45 @@ pre {
 <script>
 async function sendImage(endpoint) {
     const fileInput = document.querySelector('input[type="file"]');
-    const resultBox = document.getElementById("result");
+    const resultado = document.getElementById("resultado");
 
-    if (!fileInput.files.length) {
-        resultBox.innerText = "❌ No image selected";
+    if (!fileInput || !fileInput.files.length) {
+        if (resultado) resultado.innerText = "No hay imagen seleccionada";
         return;
     }
+
+    if (resultado) resultado.innerText = "Procesando...";
 
     const formData = new FormData();
     formData.append("image", fileInput.files[0]);
 
-    resultBox.innerText = "⏳ Procesando...";
-
     try {
-        const response = await fetch(endpoint, {
+        const res = await fetch(endpoint, {
             method: "POST",
             body: formData
         });
 
-        const contentType = response.headers.get("content-type") || "";
+        const data = await res.json();
 
-        // 🔐 PROTECCIÓN CLAVE
-        if (!contentType.includes("application/json")) {
-            const text = await response.text();
-            resultBox.innerText =
-                "❌ Backend devolvió HTML (ruta incorrecta)\n\n" +
-                text.slice(0, 300);
-            return;
+        if (resultado) {
+            resultado.innerText = JSON.stringify(data, null, 2);
         }
-
-        const data = await response.json();
-        resultBox.innerText = JSON.stringify(data, null, 2);
-
     } catch (err) {
-        resultBox.innerText = "❌ Error JS: " + err.message;
+        if (resultado) {
+            resultado.innerText = "Error: " + err.message;
+        }
     }
-}
-
-function analyze() {
-    sendImage("/analyze");
 }
 
 function setReference() {
     sendImage("/reference");
 }
 
-function analyzeBehavior() {
+function analyze() {
     sendImage("/behavior");
 }
 </script>
+
 
 
 </body>
