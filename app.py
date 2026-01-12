@@ -1,58 +1,100 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-from PIL import Image
-import io
+import requests
+import os
 
 app = Flask(__name__)
 CORS(app)
 
-# --- estado simple en memoria ---
-REFERENCE_IMAGE = None
+# ================= CONFIG =================
+HF_TOKEN = os.environ.get("HF_TOKEN")
+if not HF_TOKEN:
+    raise RuntimeError("HF_TOKEN no definido")
 
+HF_MODEL = "google/vit-base-patch16-224"
+HF_URL = f"https://router.huggingface.co/hf-inference/models/{HF_MODEL}"
+
+HEADERS = {
+    "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/octet-stream",
+    "Accept": "application/json",
+    "x-wait-for-model": "true"
+}
+
+REFERENCE = None
+
+# ================= ROUTES =================
 @app.route("/")
-def home():
+def index():
+    return render_template("index.html")
+
+@app.route("/health")
+def health():
     return jsonify({"ok": True, "service": "Behavior-Action Vision"})
 
-# -------------------------------
-# SETEAR IMAGEN DE REFERENCIA
-# -------------------------------
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    image = request.files.get("image")
+    if not image:
+        return jsonify({"ok": False, "error": "No image"}), 400
+
+    r = requests.post(HF_URL, headers=HEADERS, data=image.read(), timeout=120)
+    data = r.json()
+
+    if not isinstance(data, list) or not data:
+        return jsonify({"ok": False, "error": "Invalid model response"}), 500
+
+    top = data[0]
+    return jsonify({
+        "ok": True,
+        "label": top["label"],
+        "confidence": round(top["score"] * 100, 2),
+        "model": HF_MODEL
+    })
+
 @app.route("/reference", methods=["POST"])
 def set_reference():
-    global REFERENCE_IMAGE
+    global REFERENCE
+    image = request.files.get("image")
+    if not image:
+        return jsonify({"ok": False, "error": "No image"}), 400
 
-    if "image" not in request.files:
-        return jsonify({"error": "No image uploaded"}), 400
+    r = requests.post(HF_URL, headers=HEADERS, data=image.read(), timeout=120)
+    data = r.json()
 
-    image_bytes = request.files["image"].read()
-    REFERENCE_IMAGE = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    if not isinstance(data, list) or not data:
+        return jsonify({"ok": False, "error": "Invalid model response"}), 500
 
-    return jsonify({
-        "ok": True,
-        "message": "Referencia seteada correctamente"
-    })
+    REFERENCE = data[0]
+    return jsonify({"ok": True, "reference": REFERENCE})
 
-# -------------------------------
-# ANALIZAR COMPORTAMIENTO
-# -------------------------------
 @app.route("/behavior", methods=["POST"])
-def analyze_behavior():
-    if REFERENCE_IMAGE is None:
-        return jsonify({
-            "ok": False,
-            "error": "No hay imagen de referencia"
-        }), 400
+def behavior():
+    if not REFERENCE:
+        return jsonify({"ok": False, "error": "Reference not set"}), 400
 
-    if "image" not in request.files:
-        return jsonify({"error": "No image uploaded"}), 400
+    image = request.files.get("image")
+    if not image:
+        return jsonify({"ok": False, "error": "No image"}), 400
 
-    # ⚠️ Por ahora lógica dummy (próximo paso: visión real)
+    r = requests.post(HF_URL, headers=HEADERS, data=image.read(), timeout=120)
+    data = r.json()
+
+    if not isinstance(data, list) or not data:
+        return jsonify({"ok": False, "error": "Invalid model response"}), 500
+
+    current = data[0]
+
+    changed = current["label"] != REFERENCE["label"]
+
     return jsonify({
         "ok": True,
-        "behavior": "stable",
-        "confidence": 0.78,
-        "message": "Sin cambios relevantes detectados"
+        "behavior": "changed" if changed else "stable",
+        "current": current,
+        "reference": REFERENCE
     })
 
-# -------------------------------
+# ================= MAIN =================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
