@@ -1,8 +1,6 @@
 from flask import Flask, request, jsonify, render_template
 import requests
 import os
-import hashlib
-import time
 
 app = Flask(__name__)
 
@@ -21,140 +19,94 @@ HEADERS = {
     "x-wait-for-model": "true"
 }
 
-# ================= MEMORY (simple, en RAM) =================
-REFERENCE_IMAGE = {
-    "hash": None,
-    "result": None,
-    "timestamp": None
-}
-
-# ================= UTILS =================
-def image_hash(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-def call_hf(image_bytes: bytes):
-    if not image_bytes or len(image_bytes) < 1000:
-        return {"ok": False, "error": "Invalid or empty image"}
-
-    try:
-        r = requests.post(
-            HF_URL,
-            headers=HEADERS,
-            data=image_bytes,
-            timeout=120
-        )
-    except Exception as e:
-        return {"ok": False, "error": f"HF request failed: {str(e)}"}
-
-    ct = r.headers.get("Content-Type", "")
-    if "application/json" not in ct:
-        return {
-            "ok": False,
-            "error": "HF returned non-JSON response",
-            "raw": r.text[:300]
-        }
-
-    data = r.json()
-
-    if isinstance(data, dict) and data.get("error"):
-        return {"ok": False, "error": data["error"]}
-
-    if not isinstance(data, list) or not data:
-        return {"ok": False, "error": "Empty model response"}
-
-    top = data[0]
-
-    return {
-        "ok": True,
-        "label": top.get("label"),
-        "confidence": round(top.get("score", 0) * 100, 2),
-        "raw": data
-    }
+# ================= STATE =================
+REFERENCE = None   # se guarda en RAM
 
 # ================= ROUTES =================
 @app.route("/")
 def index():
     return render_template("index.html")
 
-# ---------- CLASIFICACIÓN SIMPLE ----------
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    if "image" not in request.files:
-        return jsonify({"ok": False, "error": "No image provided"}), 400
+    img = request.files.get("image")
+    if not img:
+        return jsonify(ok=False, error="No image"), 400
 
-    image_bytes = request.files["image"].read()
-    result = call_hf(image_bytes)
+    return run_model(img.read())
 
-    if not result["ok"]:
-        return jsonify(result), 500
-
-    return jsonify({
-        "ok": True,
-        "label": result["label"],
-        "confidence": result["confidence"],
-        "model": HF_MODEL
-    })
-
-# ---------- SETEAR REFERENCIA ----------
 @app.route("/reference", methods=["POST"])
 def set_reference():
-    if "image" not in request.files:
-        return jsonify({"ok": False, "error": "No image provided"}), 400
+    global REFERENCE
 
-    image_bytes = request.files["image"].read()
-    result = call_hf(image_bytes)
+    img = request.files.get("image")
+    if not img:
+        return jsonify(ok=False, error="No image"), 400
 
-    if not result["ok"]:
-        return jsonify(result), 500
+    result = run_model(img.read())
+    if not result.get("ok"):
+        return result, 500
 
-    REFERENCE_IMAGE["hash"] = image_hash(image_bytes)
-    REFERENCE_IMAGE["result"] = result
-    REFERENCE_IMAGE["timestamp"] = time.time()
+    REFERENCE = result
+    return jsonify(ok=True, reference=result)
 
-    return jsonify({
-        "ok": True,
-        "reference": {
-            "label": result["label"],
-            "confidence": result["confidence"]
-        }
-    })
-
-# ---------- ANALIZAR COMPORTAMIENTO ----------
 @app.route("/behavior", methods=["POST"])
 def behavior():
-    if not REFERENCE_IMAGE["result"]:
-        return jsonify({"ok": False, "error": "No reference image set"}), 400
+    if REFERENCE is None:
+        return jsonify(
+            ok=False,
+            error="No reference set yet"
+        ), 400
 
-    if "image" not in request.files:
-        return jsonify({"ok": False, "error": "No image provided"}), 400
+    img = request.files.get("image")
+    if not img:
+        return jsonify(ok=False, error="No image"), 400
 
-    image_bytes = request.files["image"].read()
-    current = call_hf(image_bytes)
+    current = run_model(img.read())
+    if not current.get("ok"):
+        return current, 500
 
-    if not current["ok"]:
-        return jsonify(current), 500
+    changed = abs(
+        current["confidence"] - REFERENCE["confidence"]
+    ) > 10
 
-    ref = REFERENCE_IMAGE["result"]
+    return jsonify(
+        ok=True,
+        behavior="changed" if changed else "stable",
+        reference=REFERENCE,
+        current=current
+    )
 
-    same_label = ref["label"] == current["label"]
-    confidence_delta = abs(ref["confidence"] - current["confidence"])
+# ================= CORE =================
+def run_model(image_bytes):
+    try:
+        r = requests.post(
+            HF_URL,
+            headers=HEADERS,
+            data=image_bytes,
+            timeout=90
+        )
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
-    if same_label and confidence_delta < 10:
-        behavior_state = "stable"
-    else:
-        behavior_state = "changed"
+    if "application/json" not in r.headers.get("Content-Type", ""):
+        return {
+            "ok": False,
+            "error": "HF returned non-JSON",
+            "raw": r.text[:200]
+        }
 
-    return jsonify({
+    data = r.json()
+    if not isinstance(data, list) or not data:
+        return {"ok": False, "error": "Empty model response"}
+
+    top = data[0]
+    return {
         "ok": True,
-        "behavior": behavior_state,
-        "label": current["label"],
-        "confidence": current["confidence"],
-        "reference": {
-            "label": ref["label"],
-            "confidence": ref["confidence"]
-        },
+        "label": top.get("label"),
+        "confidence": round(top.get("score", 0) * 100, 2),
         "model": HF_MODEL
-    })
+    }
 
 # ================= MAIN =================
 if __name__ == "__main__":
