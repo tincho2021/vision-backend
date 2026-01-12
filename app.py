@@ -18,6 +18,7 @@ HF_URL = (
 
 HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/octet-stream",
     "Accept": "application/json"
 }
 
