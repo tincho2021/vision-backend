@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Behavior-Action Vision</title>
+  <style>
+    body {
+      background: #0f0f0f;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 30px;
+    }
+    img {
+      max-width: 90%;
+      margin: 20px auto;
+      display: block;
+      border-radius: 10px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    pre {
+      background: #1e1e1e;
+      padding: 15px;
+      text-align: left;
+      max-width: 800px;
+      margin: auto;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🧠 Behavior-Action Vision</h1>
+
+<input type="file" id="file" />
+<br/>
+
+<button onclick="setReference()">📌 Setear referencia</button>
+<button onclick="analyze()">🔍 Analizar comportamiento</button>
+
+<img id="preview"/>
+
+<h2>Resultado</h2>
+<pre id="result">Sin datos</pre>
+
+<script>
+const API = "";
+
+function getFile() {
+  return document.getElementById("file").files[0];
+}
+
+document.getElementById("file").onchange = e => {
+  const img = document.getElementById("preview");
+  img.src = URL.createObjectURL(e.target.files[0]);
+};
+
+async function send(endpoint) {
+  const file = getFile();
+  if (!file) return alert("Seleccioná una imagen");
+
+  const form = new FormData();
+  form.append("image", file);
+
+  const res = await fetch(API + endpoint, { method: "POST", body: form });
+  const json = await res.json();
+  document.getElementById("result").innerText = JSON.stringify(json, null, 2);
+}
+
+function setReference() {
+  send("/reference");
+}
+
+function analyze() {
+  send("/behavior");
+}
+</script>
+
+</body>
+</html>
