@@ -1,109 +1,108 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<title>Behavior-Action Vision</title>
-<style>
-body {
-  background: #0f0f0f;
-  color: white;
-  font-family: Arial;
-  text-align: center;
-}
-button {
-  padding: 10px 15px;
-  margin: 5px;
-}
-input[type=range] {
-  width: 300px;
-}
-pre {
-  background: #1e1e1e;
-  padding: 15px;
-  text-align: left;
-  display: inline-block;
-}
-</style>
+  <meta charset="UTF-8">
+  <title>Behavior-Action Vision</title>
+  <style>
+    body {
+      background: #0e0e0e;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    img {
+      max-width: 500px;
+      margin-top: 15px;
+      border-radius: 6px;
+    }
+    button {
+      margin: 10px;
+      padding: 10px 16px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .result {
+      background: #111;
+      margin: 20px auto;
+      padding: 15px;
+      width: 70%;
+      text-align: left;
+      border-radius: 6px;
+      font-family: monospace;
+    }
+  </style>
 </head>
-
 <body>
 
 <h1>🧠 Behavior-Action Vision</h1>
 
-<input type="file" id="fileInput"><br><br>
+<input type="file" id="fileInput" accept="image/*"><br>
 
 <button onclick="setReference()">📌 Setear referencia</button>
 <button onclick="analyze()">🔍 Analizar comportamiento</button>
 
-<br><br>
-
 <h3>Sensibilidad de detección</h3>
-<input type="range" id="threshold" min="0.01" max="0.5" step="0.01" value="0.25"
-       oninput="updateThresholdLabel()">
+<input type="range" id="threshold" min="0.05" max="0.6" step="0.01" value="0.25"
+       oninput="document.getElementById('tval').innerText=this.value">
 <br>
-<span id="thresholdLabel">Threshold: 0.25</span>
+Threshold: <span id="tval">0.25</span>
 
-<br><br>
-
-<img id="preview" width="400"><br><br>
+<div>
+  <img id="preview">
+</div>
 
 <h2>Resultado</h2>
-<pre id="result"></pre>
+<pre class="result" id="result"></pre>
 
 <script>
 let base64Image = null;
 
 document.getElementById("fileInput").addEventListener("change", e => {
+  const file = e.target.files[0];
   const reader = new FileReader();
   reader.onload = () => {
-    base64Image = reader.result;
-    document.getElementById("preview").src = base64Image;
+    base64Image = reader.result.split(",")[1];
+    document.getElementById("preview").src = reader.result;
   };
-  reader.readAsDataURL(e.target.files[0]);
+  reader.readAsDataURL(file);
 });
 
-function updateThresholdLabel() {
-  const v = document.getElementById("threshold").value;
-  document.getElementById("thresholdLabel").innerText = `Threshold: ${v}`;
-}
+async function setReference() {
+  if (!base64Image) {
+    alert("Seleccioná una imagen primero");
+    return;
+  }
 
-function setReference() {
-  fetch("/set_reference", {
+  const res = await fetch("/reference", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({ image: base64Image })
-  })
-  .then(r => r.json())
-  .then(j => document.getElementById("result").innerText = JSON.stringify(j, null, 2));
+  });
+
+  const json = await res.json();
+  document.getElementById("result").innerText = JSON.stringify(json, null, 2);
 }
 
-function analyze() {
+async function analyze() {
   if (!base64Image) {
-    alert("Primero seleccioná una imagen");
+    alert("Seleccioná una imagen primero");
     return;
   }
 
   const threshold = document.getElementById("threshold").value;
 
-  fetch("/analyze", {
+  const res = await fetch("/analyze", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       image: base64Image,
       threshold: threshold
     })
-  })
-  .then(r => r.json())
-  .then(j => {
-    document.getElementById("result").innerText =
-      JSON.stringify(j, null, 2);
-  })
-  .catch(err => {
-    document.getElementById("result").innerText =
-      "Error: " + err;
   });
-}
 
+  const json = await res.json();
+  document.getElementById("result").innerText = JSON.stringify(json, null, 2);
+}
 </script>
 
 </body>
