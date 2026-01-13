@@ -1,83 +1,96 @@
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-import cv2
-import numpy as np
-from skimage.metrics import structural_similarity as ssim
-import tempfile
+from flask import Flask, request, jsonify
+import requests
 import os
+import numpy as np
+import hashlib
 
-app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app)
+app = Flask(__name__)
 
-REFERENCE_IMAGE = None
+# ================= CONFIG =================
+HF_TOKEN = os.environ["HF_TOKEN"]
+TG_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TG_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
+HF_MODEL = "google/vit-base-patch16-224"
+HF_URL = f"https://router.huggingface.co/hf-inference/models/{HF_MODEL}"
 
-@app.route("/")
-def index():
-    return send_from_directory("static", "index.html")
+HEADERS = {
+    "Authorization": f"Bearer {HF_TOKEN}",
+    "Content-Type": "application/octet-stream"
+}
 
+# ================= STATE =================
+REFERENCE_EMBED = None
+REFERENCE_HASH = None
 
-@app.route("/health")
-def health():
-    return jsonify(ok=True, service="Behavior-Action Vision")
+THRESH_CRITICAL = 0.70
+THRESH_LEVE = 0.90
 
+# ================= HELPERS =================
+def cosine(a, b):
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
-def read_image(file):
-    data = np.frombuffer(file.read(), np.uint8)
-    img = cv2.imdecode(data, cv2.IMREAD_GRAYSCALE)
-    return img
+def send_telegram(text, image_bytes=None):
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    requests.post(url, json={
+        "chat_id": TG_CHAT_ID,
+        "text": text
+    })
 
+    if image_bytes:
+        url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
+        requests.post(url, files={
+            "photo": image_bytes
+        }, data={
+            "chat_id": TG_CHAT_ID
+        })
 
-@app.route("/reference", methods=["POST"])
-def set_reference():
-    global REFERENCE_IMAGE
+# ================= ROUTE =================
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    global REFERENCE_EMBED, REFERENCE_HASH
 
-    if "image" not in request.files:
-        return jsonify(ok=False, error="No image provided"), 400
+    img = request.data
+    if not img:
+        return jsonify({"ok": False, "error": "No image"}), 400
 
-    img = read_image(request.files["image"])
-    if img is None:
-        return jsonify(ok=False, error="Invalid image"), 400
+    # hash para evitar reprocesar la misma imagen
+    h = hashlib.md5(img).hexdigest()
+    if h == REFERENCE_HASH:
+        return jsonify({"ok": True, "status": "same_image"})
 
-    REFERENCE_IMAGE = img
-    return jsonify(ok=True, message="Reference image set")
+    r = requests.post(HF_URL, headers=HEADERS, data=img, timeout=60)
+    data = r.json()
 
+    if not isinstance(data, list) or not data:
+        return jsonify({"ok": False, "error": "Invalid HF response"}), 500
 
-@app.route("/behavior", methods=["POST"])
-def analyze_behavior():
-    global REFERENCE_IMAGE
+    vec = np.array([x["score"] for x in data])
 
-    if REFERENCE_IMAGE is None:
-        return jsonify(ok=False, error="Reference not set"), 400
+    if REFERENCE_EMBED is None:
+        REFERENCE_EMBED = vec
+        REFERENCE_HASH = h
+        return jsonify({"ok": True, "status": "reference_set"})
 
-    if "image" not in request.files:
-        return jsonify(ok=False, error="No image provided"), 400
+    sim = cosine(vec, REFERENCE_EMBED)
 
-    img = read_image(request.files["image"])
-    if img is None:
-        return jsonify(ok=False, error="Invalid image"), 400
+    if sim < THRESH_CRITICAL:
+        send_telegram(
+            f"🚨 CAMBIO CRÍTICO DETECTADO\nSimilitud: {sim:.2f}",
+            img
+        )
+        return jsonify({"ok": True, "status": "critical", "similarity": sim})
 
-    # Resize to match
-    img = cv2.resize(img, (REFERENCE_IMAGE.shape[1], REFERENCE_IMAGE.shape[0]))
+    # cambio leve → actualizar referencia
+    REFERENCE_EMBED = vec
+    REFERENCE_HASH = h
 
-    score, diff = ssim(REFERENCE_IMAGE, img, full=True)
-    diff = (diff * 255).astype("uint8")
+    return jsonify({
+        "ok": True,
+        "status": "stable",
+        "similarity": sim
+    })
 
-    change_level = float(1 - score)
-
-    behavior = "stable"
-    if change_level > 0.15:
-        behavior = "changed"
-    if change_level > 0.35:
-        behavior = "critical change"
-
-    return jsonify(
-        ok=True,
-        similarity=score,
-        change=change_level,
-        behavior=behavior
-    )
-
-
+# ================= MAIN =================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
