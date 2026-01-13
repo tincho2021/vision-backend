@@ -1,102 +1,120 @@
-from flask import Flask, request, jsonify, send_from_directory
 import os
+import io
 import base64
-import cv2
+import requests
+from flask import Flask, request, jsonify, send_from_directory
+from flask_cors import CORS
+from PIL import Image
 import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 
-app = Flask(__name__, static_folder="static")
+app = Flask(__name__, static_folder="static", static_url_path="")
+CORS(app)
 
-REFERENCE_PATH = "reference.jpg"
+# ===============================
+# ENV
+# ===============================
+HF_TOKEN = os.getenv("HF_TOKEN")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# ---------- UTILS ----------
+reference_embedding = None
 
-def decode_image(base64_str):
-    img_bytes = base64.b64decode(base64_str)
-    np_arr = np.frombuffer(img_bytes, np.uint8)
-    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    return img
+# ===============================
+# UTILS
+# ===============================
+def image_to_embedding(image: Image.Image):
+    """
+    Convierte una imagen a un embedding simple (baseline).
+    No interpreta, solo representa.
+    """
+    image = image.resize((224, 224)).convert("RGB")
+    arr = np.asarray(image).astype(np.float32)
+    arr = arr / 255.0
+    return arr.flatten()
 
-def similarity_score(img1, img2):
-    img1_gray = cv2.cvtColor(img1, cv2.COLOR_BGR2GRAY)
-    img2_gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY)
+def send_telegram_alert(message: str):
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
 
-    img1_gray = cv2.resize(img1_gray, (300, 300))
-    img2_gray = cv2.resize(img2_gray, (300, 300))
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": message
+    }
 
-    diff = cv2.absdiff(img1_gray, img2_gray)
-    score = np.mean(diff) / 255.0
-    similarity = 1.0 - score
-    return similarity, score
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception:
+        pass
 
-# ---------- ROUTES ----------
-
+# ===============================
+# ROUTES
+# ===============================
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
 
 @app.route("/reference", methods=["POST"])
 def set_reference():
-    try:
-        data = request.get_json(force=True)
-        img_b64 = data.get("image")
+    global reference_embedding
 
-        if not img_b64:
-            return jsonify({"ok": False, "error": "No image received"}), 400
+    if "image" not in request.files:
+        return jsonify(ok=False, error="No image provided"), 400
 
-        img = decode_image(img_b64)
-        cv2.imwrite(REFERENCE_PATH, img)
+    image = Image.open(request.files["image"])
+    reference_embedding = image_to_embedding(image)
 
-        return jsonify({
-            "ok": True,
-            "message": "Referencia seteada correctamente"
-        })
-
-    except Exception as e:
-        return jsonify({
-            "ok": False,
-            "error": str(e)
-        }), 500
+    return jsonify(
+        ok=True,
+        message="Referencia seteada correctamente"
+    )
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
+    global reference_embedding
+
+    if reference_embedding is None:
+        return jsonify(ok=False, error="Referencia no seteada"), 400
+
+    if "image" not in request.files:
+        return jsonify(ok=False, error="No image provided"), 400
+
     try:
-        if not os.path.exists(REFERENCE_PATH):
-            return jsonify({
-                "ok": False,
-                "error": "Referencia no seteada"
-            }), 400
+        threshold = float(request.form.get("threshold", 0.25))
+    except ValueError:
+        threshold = 0.25
 
-        data = request.get_json(force=True)
-        img_b64 = data.get("image")
-        threshold = float(data.get("threshold", 0.25))
+    image = Image.open(request.files["image"])
+    current_embedding = image_to_embedding(image)
 
-        if not img_b64:
-            return jsonify({
-                "ok": False,
-                "error": "No image received"
-            }), 400
+    similarity = cosine_similarity(
+        [reference_embedding],
+        [current_embedding]
+    )[0][0]
 
-        current_img = decode_image(img_b64)
-        ref_img = cv2.imread(REFERENCE_PATH)
+    change_score = float(1.0 - similarity)
+    critical_change = bool(change_score >= threshold)
 
-        similarity, change_score = similarity_score(ref_img, current_img)
-        critical_change = change_score >= threshold
+    # 🚨 ALERTA TELEGRAM
+    if critical_change:
+        send_telegram_alert(
+            "🚨 CAMBIO CRÍTICO DETECTADO\n"
+            f"Change score: {round(change_score, 3)}\n"
+            f"Threshold: {threshold}"
+        )
 
-        return jsonify({
-            "ok": True,
-            "similarity": round(similarity, 4),
-            "change_score": round(change_score, 4),
-            "threshold": threshold,
-            "critical_change": bool(critical_change)
-        })
+    return jsonify(
+        ok=True,
+        similarity=round(similarity, 4),
+        change_score=round(change_score, 4),
+        threshold=threshold,
+        critical_change=critical_change
+    )
 
-    except Exception as e:
-        return jsonify({
-            "ok": False,
-            "error": str(e)
-        }), 500
-
-# ---------- MAIN ----------
-
+# ===============================
+# MAIN
+# ===============================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
