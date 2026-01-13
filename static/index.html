@@ -2,160 +2,186 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Behavior-Action Vision</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <style>
-    body{
-      font-family: Arial, sans-serif;
-      background:#111;
-      color:#eee;
-      text-align:center;
-      padding:30px;
+    body {
+      background: #0e0e0e;
+      color: #eaeaea;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 0;
     }
-    .wrap{
-      max-width:900px;
-      margin:0 auto;
+
+    h1 {
+      margin-top: 20px;
+      font-size: 28px;
     }
-    h1{ margin: 0 0 10px; }
-    .controls{
-      margin: 15px 0 20px;
+
+    .container {
+      max-width: 900px;
+      margin: auto;
+      padding: 20px;
     }
-    input, button{
-      font-size:16px;
-      margin:10px;
-      padding:10px 14px;
-    }
-    button{
-      cursor:pointer;
-      border:0;
-      border-radius:8px;
-      background:#eee;
-      color:#111;
-      font-weight:600;
-    }
-    button:hover{ opacity:0.9; }
-    img{
-      max-width: 820px;
-      width: 100%;
-      margin-top: 15px;
-      border: 2px solid #333;
+
+    .card {
+      background: #1a1a1a;
       border-radius: 10px;
-      background:#000;
+      padding: 20px;
+      margin-top: 20px;
     }
-    .panel{
-      margin: 20px auto;
-      max-width: 820px;
-      text-align:left;
-      background:#1b1b1b;
-      border-radius:10px;
-      padding:15px;
-      overflow:auto;
-      border:1px solid #2a2a2a;
+
+    input[type="file"],
+    input[type="text"] {
+      width: 100%;
+      padding: 8px;
+      margin: 6px 0;
+      background: #111;
+      border: 1px solid #333;
+      color: #fff;
+      border-radius: 6px;
     }
-    .sliderbox{
-      margin: 20px auto;
-      max-width: 520px;
-      background:#1b1b1b;
-      border:1px solid #2a2a2a;
-      border-radius:10px;
-      padding:15px;
+
+    button {
+      margin: 8px;
+      padding: 10px 16px;
+      font-size: 15px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      background: #ffffff;
+      color: #000;
     }
-    .sliderbox label{
-      display:block;
-      margin-bottom:10px;
-      font-weight:700;
+
+    button:hover {
+      opacity: 0.9;
     }
-    #thresholdValue{
-      font-weight:700;
+
+    img {
+      max-width: 100%;
+      border-radius: 10px;
+      margin-top: 15px;
     }
-    .small{
-      color:#bbb;
+
+    .slider {
+      width: 100%;
+    }
+
+    pre {
+      background: #111;
+      padding: 15px;
+      border-radius: 8px;
+      text-align: left;
+      overflow-x: auto;
       font-size: 13px;
-      margin-top:8px;
+    }
+
+    .label {
+      text-align: left;
+      font-size: 14px;
+      margin-top: 10px;
     }
   </style>
 </head>
+
 <body>
-  <div class="wrap">
-    <h1>🧠 Behavior-Action Vision</h1>
+  <h1>🧠 Behavior-Action Vision</h1>
 
-    <div class="controls">
-      <input type="file" id="fileInput" accept="image/*" />
-      <br/>
-      <button id="btnReference">📌 Setear referencia</button>
-      <button id="btnAnalyze">🔎 Analizar comportamiento</button>
+  <div class="container">
+
+    <div class="card">
+      <input type="file" id="imageInput" accept="image/*" />
+
+      <div class="label">Device ID</div>
+      <input type="text" id="deviceId" value="web" />
+
+      <div class="label">Telegram chat_id (opcional)</div>
+      <input type="text" id="chatId" placeholder="Ej: 5405673696" />
+
+      <div class="label">Sensibilidad de detección</div>
+      <input type="range" min="0.01" max="0.8" step="0.01" value="0.05"
+             id="thresholdSlider" class="slider"
+             oninput="updateThreshold()" />
+
+      <div id="thresholdLabel">Threshold: 0.05</div>
+
+      <br />
+
+      <button onclick="setReference()">📌 Setear referencia</button>
+      <button onclick="analyze()">🔍 Analizar comportamiento</button>
+
+      <img id="preview" />
     </div>
 
-    <div class="sliderbox">
-      <label for="threshold">Sensibilidad de detección</label>
-      <input type="range" id="threshold" min="0.05" max="0.80" step="0.01" value="0.25" style="width:100%;">
-      <div>Threshold: <span id="thresholdValue">0.25</span></div>
-      <div class="small">Más bajo = más sensible (más alertas). Más alto = menos sensible.</div>
+    <div class="card">
+      <h3>Resultado</h3>
+      <pre id="result">{}</pre>
     </div>
 
-    <img id="preview" style="display:none" />
-
-    <h2>Resultado</h2>
-    <div class="panel"><pre id="result">Sin datos</pre></div>
   </div>
 
-<script>
-  const fileInput = document.getElementById("fileInput");
-  const preview = document.getElementById("preview");
-  const resultEl = document.getElementById("result");
-  const btnReference = document.getElementById("btnReference");
-  const btnAnalyze = document.getElementById("btnAnalyze");
-  const threshold = document.getElementById("threshold");
-  const thresholdValue = document.getElementById("thresholdValue");
+  <script>
+    const preview = document.getElementById("preview");
+    const resultBox = document.getElementById("result");
 
-  threshold.addEventListener("input", () => {
-    thresholdValue.textContent = Number(threshold.value).toFixed(2);
-  });
-
-  fileInput.addEventListener("change", () => {
-    const f = fileInput.files[0];
-    if (!f) {
-      preview.style.display = "none";
-      return;
-    }
-    preview.src = URL.createObjectURL(f);
-    preview.style.display = "block";
-  });
-
-  function setResult(obj){
-    resultEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2);
-  }
-
-  async function postImage(endpoint){
-    const f = fileInput.files[0];
-    if (!f) {
-      setResult({ok:false, error:"Seleccioná una imagen primero"});
-      return;
+    function updateThreshold() {
+      const v = document.getElementById("thresholdSlider").value;
+      document.getElementById("thresholdLabel").innerText = "Threshold: " + v;
     }
 
-    const fd = new FormData();
-    // IMPORTANTE: el backend espera "image"
-    fd.append("image", f);
+    document.getElementById("imageInput").addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (file) {
+        preview.src = URL.createObjectURL(file);
+      }
+    });
 
-    // threshold solo para analyze
-    if (endpoint === "/analyze") {
-      fd.append("threshold", threshold.value);
+    async function send(endpoint) {
+      const img = document.getElementById("imageInput").files[0];
+      if (!img) {
+        alert("Seleccioná una imagen");
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append("image", img);
+      fd.append("device_id", document.getElementById("deviceId").value);
+      fd.append("threshold", document.getElementById("thresholdSlider").value);
+
+      const chatId = document.getElementById("chatId").value.trim();
+      if (chatId !== "") {
+        fd.append("chat_id", chatId);
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          body: fd
+        });
+
+        const text = await res.text();
+
+        try {
+          resultBox.textContent = JSON.stringify(JSON.parse(text), null, 2);
+        } catch {
+          resultBox.textContent =
+            "Respuesta inválida del servidor:\n\n" + text;
+        }
+
+      } catch (err) {
+        resultBox.textContent = "Error de red: " + err;
+      }
     }
 
-    const r = await fetch(endpoint, { method: "POST", body: fd });
-    const text = await r.text();
-
-    // Intentar parse JSON; si falla, mostrar texto
-    try {
-      const data = JSON.parse(text);
-      setResult(data);
-    } catch (e) {
-      setResult("Respuesta no JSON:\n" + text);
+    function setReference() {
+      send("/reference");
     }
-  }
 
-  btnReference.addEventListener("click", () => postImage("/reference"));
-  btnAnalyze.addEventListener("click", () => postImage("/analyze"));
-</script>
+    function analyze() {
+      send("/analyze");
+    }
+  </script>
 </body>
 </html>
