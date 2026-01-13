@@ -1,135 +1,139 @@
+from flask import Flask, request, jsonify, render_template
 import os
-import requests
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-from PIL import Image
+import uuid
+import json
+import cv2
 import numpy as np
-import tempfile
+from skimage.metrics import structural_similarity as ssim
+import requests
 
-app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app)
+# ================= CONFIG =================
+BASE_DIR = "devices"
+os.makedirs(BASE_DIR, exist_ok=True)
 
-# ===============================
-# ENV
-# ===============================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+if not TELEGRAM_TOKEN:
+    raise RuntimeError("TELEGRAM_TOKEN no definido")
 
-reference_embedding = None
+# ================= APP =================
+app = Flask(__name__)
 
-# ===============================
-# UTILS
-# ===============================
-def _get_uploaded_image():
-    if "image" in request.files:
-        f = request.files["image"]
-    elif "file" in request.files:
-        f = request.files["file"]
-    else:
-        return None
+# ================= HELPERS =================
+def device_dir(device_id):
+    path = os.path.join(BASE_DIR, device_id)
+    os.makedirs(path, exist_ok=True)
+    return path
 
-    if f.filename == "":
-        return None
+def load_config(device_id):
+    cfg_path = os.path.join(device_dir(device_id), "config.json")
+    if not os.path.exists(cfg_path):
+        return {
+            "threshold": 0.20,
+            "telegram_chat": None
+        }
+    with open(cfg_path, "r") as f:
+        return json.load(f)
 
-    try:
-        return Image.open(f.stream).convert("RGB")
-    except Exception:
-        return None
+def save_config(device_id, cfg):
+    with open(os.path.join(device_dir(device_id), "config.json"), "w") as f:
+        json.dump(cfg, f, indent=2)
 
-def image_to_embedding(image):
-    image = image.resize((128, 128)).convert("RGB")
-    arr = np.asarray(image).astype(np.float32) / 255.0
-    return arr.flatten()
+def decode_image(data):
+    img = np.frombuffer(data, np.uint8)
+    return cv2.imdecode(img, cv2.IMREAD_GRAYSCALE)
 
-def cosine_similarity(a, b):
-    dot = float(np.dot(a, b))
-    na = float(np.linalg.norm(a))
-    nb = float(np.linalg.norm(b))
-    return dot / (na * nb) if na and nb else 0.0
+def send_telegram(chat_id, image_path, caption):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    with open(image_path, "rb") as f:
+        requests.post(url, data={
+            "chat_id": chat_id,
+            "caption": caption
+        }, files={"photo": f})
 
-def send_telegram_photo(image, caption):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-
-    with tempfile.NamedTemporaryFile(suffix=".jpg") as tmp:
-        image.save(tmp.name, format="JPEG", quality=90)
-
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-        with open(tmp.name, "rb") as photo:
-            r = requests.post(
-                url,
-                data={
-                    "chat_id": TELEGRAM_CHAT_ID,
-                    "caption": caption
-                },
-                files={"photo": photo},
-                timeout=15
-            )
-        return r.status_code == 200
-
-# ===============================
-# ROUTES
-# ===============================
+# ================= ROUTES =================
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return render_template("index.html")
 
+# ---------- SET REFERENCE ----------
 @app.route("/reference", methods=["POST"])
 def set_reference():
-    global reference_embedding
+    device_id = request.form.get("device_id")
+    if not device_id or "image" not in request.files:
+        return jsonify({"ok": False, "error": "device_id or image missing"}), 400
 
-    img = _get_uploaded_image()
-    if img is None:
-        return jsonify(ok=False, error="No image provided"), 400
+    img = request.files["image"].read()
+    path = os.path.join(device_dir(device_id), "reference.jpg")
 
-    reference_embedding = image_to_embedding(img)
-    return jsonify(ok=True, message="Referencia seteada correctamente")
+    with open(path, "wb") as f:
+        f.write(img)
 
+    return jsonify({"ok": True, "msg": "Referencia guardada"})
+
+# ---------- ANALYZE ----------
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    global reference_embedding
+    device_id = request.form.get("device_id")
+    chat_id = request.form.get("chat_id")
 
-    if reference_embedding is None:
-        return jsonify(ok=False, error="Referencia no seteada"), 400
+    if not device_id or "image" not in request.files:
+        return jsonify({"ok": False, "error": "device_id or image missing"}), 400
 
-    img = _get_uploaded_image()
-    if img is None:
-        return jsonify(ok=False, error="No image provided"), 400
+    cfg = load_config(device_id)
 
-    try:
-        threshold = float(request.form.get("threshold", "0.25"))
-    except ValueError:
-        threshold = 0.25
+    if chat_id:
+        cfg["telegram_chat"] = chat_id
+        save_config(device_id, cfg)
 
-    current_embedding = image_to_embedding(img)
+    threshold = float(request.form.get("threshold", cfg["threshold"]))
 
-    similarity = cosine_similarity(reference_embedding, current_embedding)
-    change_score = 1.0 - similarity
-    critical_change = change_score >= threshold
+    ref_path = os.path.join(device_dir(device_id), "reference.jpg")
+    if not os.path.exists(ref_path):
+        return jsonify({"ok": False, "error": "No reference image"}), 400
 
-    telegram_sent = False
+    img_data = request.files["image"].read()
+    current = decode_image(img_data)
+    reference = cv2.imread(ref_path, cv2.IMREAD_GRAYSCALE)
 
-    if critical_change:
-        caption = (
-            "🚨 CAMBIO CRÍTICO DETECTADO\n\n"
-            f"Change score: {change_score:.3f}\n"
-            f"Similarity: {similarity:.3f}\n"
-            f"Threshold: {threshold:.2f}"
+    score = ssim(reference, current)
+    changed = (1 - score) > threshold
+
+    last_path = os.path.join(device_dir(device_id), "last.jpg")
+    with open(last_path, "wb") as f:
+        f.write(img_data)
+
+    if changed and cfg["telegram_chat"]:
+        send_telegram(
+            cfg["telegram_chat"],
+            last_path,
+            f"⚠️ Cambio detectado\nDevice: {device_id}\nΔ={round(1-score,3)}"
         )
-        telegram_sent = send_telegram_photo(img, caption)
 
-    return jsonify(
-        ok=True,
-        similarity=round(similarity, 4),
-        change_score=round(change_score, 4),
-        threshold=round(threshold, 2),
-        critical_change=critical_change,
-        telegram_sent=telegram_sent
-    )
+    return jsonify({
+        "ok": True,
+        "device": device_id,
+        "similarity": round(score, 3),
+        "delta": round(1 - score, 3),
+        "threshold": threshold,
+        "alert": changed
+    })
 
-# ===============================
-# MAIN
-# ===============================
+# ---------- UPDATE CONFIG ----------
+@app.route("/config", methods=["POST"])
+def update_config():
+    data = request.json
+    device_id = data.get("device_id")
+
+    if not device_id:
+        return jsonify({"ok": False}), 400
+
+    cfg = load_config(device_id)
+    cfg.update(data)
+    save_config(device_id, cfg)
+
+    return jsonify({"ok": True})
+
+# ================= MAIN =================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
