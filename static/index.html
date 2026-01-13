@@ -1,83 +1,95 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <title>Behavior-Action Vision</title>
-  <style>
-    body {
-      background: #0f0f0f;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 30px;
-    }
-    img {
-      max-width: 90%;
-      margin: 20px auto;
-      display: block;
-      border-radius: 10px;
-    }
-    button {
-      padding: 10px 20px;
-      margin: 10px;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    pre {
-      background: #1e1e1e;
-      padding: 15px;
-      text-align: left;
-      max-width: 800px;
-      margin: auto;
-      border-radius: 8px;
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Behavior-Action Vision</title>
+<style>
+body {
+  background: #0f0f0f;
+  color: white;
+  font-family: Arial;
+  text-align: center;
+}
+button {
+  padding: 10px 15px;
+  margin: 5px;
+}
+input[type=range] {
+  width: 300px;
+}
+pre {
+  background: #1e1e1e;
+  padding: 15px;
+  text-align: left;
+  display: inline-block;
+}
+</style>
 </head>
+
 <body>
 
 <h1>🧠 Behavior-Action Vision</h1>
 
-<input type="file" id="file" />
-<br/>
+<input type="file" id="fileInput"><br><br>
 
 <button onclick="setReference()">📌 Setear referencia</button>
 <button onclick="analyze()">🔍 Analizar comportamiento</button>
 
-<img id="preview"/>
+<br><br>
+
+<h3>Sensibilidad de detección</h3>
+<input type="range" id="threshold" min="0.01" max="0.5" step="0.01" value="0.25"
+       oninput="updateThresholdLabel()">
+<br>
+<span id="thresholdLabel">Threshold: 0.25</span>
+
+<br><br>
+
+<img id="preview" width="400"><br><br>
 
 <h2>Resultado</h2>
-<pre id="result">Sin datos</pre>
+<pre id="result"></pre>
 
 <script>
-const API = "";
+let base64Image = null;
 
-function getFile() {
-  return document.getElementById("file").files[0];
-}
+document.getElementById("fileInput").addEventListener("change", e => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    base64Image = reader.result;
+    document.getElementById("preview").src = base64Image;
+  };
+  reader.readAsDataURL(e.target.files[0]);
+});
 
-document.getElementById("file").onchange = e => {
-  const img = document.getElementById("preview");
-  img.src = URL.createObjectURL(e.target.files[0]);
-};
-
-async function send(endpoint) {
-  const file = getFile();
-  if (!file) return alert("Seleccioná una imagen");
-
-  const form = new FormData();
-  form.append("image", file);
-
-  const res = await fetch(API + endpoint, { method: "POST", body: form });
-  const json = await res.json();
-  document.getElementById("result").innerText = JSON.stringify(json, null, 2);
+function updateThresholdLabel() {
+  const v = document.getElementById("threshold").value;
+  document.getElementById("thresholdLabel").innerText = `Threshold: ${v}`;
 }
 
 function setReference() {
-  send("/reference");
+  fetch("/set_reference", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ image: base64Image })
+  })
+  .then(r => r.json())
+  .then(j => document.getElementById("result").innerText = JSON.stringify(j, null, 2));
 }
 
 function analyze() {
-  send("/behavior");
+  const threshold = document.getElementById("threshold").value;
+
+  fetch("/analyze", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      image: base64Image,
+      threshold: threshold
+    })
+  })
+  .then(r => r.json())
+  .then(j => document.getElementById("result").innerText = JSON.stringify(j, null, 2));
 }
 </script>
 
