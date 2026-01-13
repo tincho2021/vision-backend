@@ -71,29 +71,40 @@ def set_reference():
 
 @app.route("/analyze", methods=["POST"])
 def analyze():
-    if not os.path.exists(REFERENCE_IMAGE_PATH):
-        return jsonify({"ok": False, "error": "Referencia no configurada"}), 400
+    try:
+        if not os.path.exists(REFERENCE_IMAGE_PATH):
+            return jsonify({"ok": False, "error": "Referencia no configurada"}), 400
 
-    data = request.json
-    threshold = float(data.get("threshold", DEFAULT_THRESHOLD))
+        data = request.json
+        if not data or "image" not in data:
+            return jsonify({"ok": False, "error": "Imagen no recibida"}), 400
 
-    current_img = load_image_from_base64(data["image"])
-    ref_img = Image.open(REFERENCE_IMAGE_PATH).convert("L")
+        threshold = float(data.get("threshold", DEFAULT_THRESHOLD))
 
-    similarity, change_score = compare_images(ref_img, current_img)
+        current_img = load_image_from_base64(data["image"])
+        ref_img = Image.open(REFERENCE_IMAGE_PATH).convert("L")
 
-    critical = change_score > threshold
+        similarity, change_score = compare_images(ref_img, current_img)
+        critical = change_score > threshold
 
-    if critical:
-        send_telegram_alert(change_score)
+        if critical:
+            send_telegram_alert(change_score)
 
-    return jsonify({
-        "ok": True,
-        "similarity": round(similarity, 4),
-        "change_score": round(change_score, 4),
-        "threshold": threshold,
-        "critical_change": critical
-    })
+        return jsonify({
+            "ok": True,
+            "similarity": round(similarity, 4),
+            "change_score": round(change_score, 4),
+            "threshold": threshold,
+            "critical_change": critical
+        })
+
+    except Exception as e:
+        print("ERROR ANALYZE:", e)
+        return jsonify({
+            "ok": False,
+            "error": str(e)
+        }), 500
+
 
 
 # =========================
