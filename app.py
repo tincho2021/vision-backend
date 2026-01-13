@@ -1,12 +1,9 @@
 import os
-import io
-import base64
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from PIL import Image
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
@@ -14,7 +11,6 @@ CORS(app)
 # ===============================
 # ENV
 # ===============================
-HF_TOKEN = os.getenv("HF_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -24,14 +20,18 @@ reference_embedding = None
 # UTILS
 # ===============================
 def image_to_embedding(image: Image.Image):
-    """
-    Convierte una imagen a un embedding simple (baseline).
-    No interpreta, solo representa.
-    """
-    image = image.resize((224, 224)).convert("RGB")
+    image = image.resize((128, 128)).convert("RGB")
     arr = np.asarray(image).astype(np.float32)
     arr = arr / 255.0
     return arr.flatten()
+
+def cosine_similarity(a, b):
+    dot = np.dot(a, b)
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(dot / (norm_a * norm_b))
 
 def send_telegram_alert(message: str):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
@@ -88,15 +88,10 @@ def analyze():
     image = Image.open(request.files["image"])
     current_embedding = image_to_embedding(image)
 
-    similarity = cosine_similarity(
-        [reference_embedding],
-        [current_embedding]
-    )[0][0]
+    similarity = cosine_similarity(reference_embedding, current_embedding)
+    change_score = 1.0 - similarity
+    critical_change = change_score >= threshold
 
-    change_score = float(1.0 - similarity)
-    critical_change = bool(change_score >= threshold)
-
-    # 🚨 ALERTA TELEGRAM
     if critical_change:
         send_telegram_alert(
             "🚨 CAMBIO CRÍTICO DETECTADO\n"
