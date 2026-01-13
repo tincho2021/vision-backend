@@ -78,6 +78,11 @@ function setReference() {
 }
 
 function analyze() {
+  if (!base64Image) {
+    alert("Primero seleccioná una imagen");
+    return;
+  }
+
   const threshold = document.getElementById("threshold").value;
 
   fetch("/analyze", {
@@ -89,8 +94,16 @@ function analyze() {
     })
   })
   .then(r => r.json())
-  .then(j => document.getElementById("result").innerText = JSON.stringify(j, null, 2));
+  .then(j => {
+    document.getElementById("result").innerText =
+      JSON.stringify(j, null, 2);
+  })
+  .catch(err => {
+    document.getElementById("result").innerText =
+      "Error: " + err;
+  });
 }
+
 </script>
 
 </body>
